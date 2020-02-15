@@ -4,9 +4,10 @@ kinogen is a lightweight film cataloguing software utilizing [OMDb API](https://
 
 ## features
 - sorts, manages, and provides information for all your films
-- capable of parsing (almost) any naming convention(e.g. Lifeboat.1944.720p.BluRay.x264)
+- parser capable of handling [https://en.wikipedia.org/wiki/Standard_(warez)#Naming](warez) naming
 - cross-platform and easily portable
 - export/ import library schemes
+- manually search
 
 ## building
 1. clone recursively
