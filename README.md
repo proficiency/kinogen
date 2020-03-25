@@ -8,6 +8,8 @@ currently it is very unstable, unoptimized, and lacking in inspiration
 - simple interface allows you to manage your collection of films relatively easily
 - automatically parses files formatted in the [warez scene](https://en.wikipedia.org/wiki/Standard_(warez)#Naming) standard
 - save/ load library scheme
+![](https://files.catbox.moe/u7b832.png)
+![](https://files.catbox.moe/cuvuio.png)
 
 ## building
 1. clone recursively
