@@ -1,92 +1,175 @@
 #pragma once
-#define OMDB_API_KEY "fe36d3db" // we gotta parse this from a file, 1k limit unless i'm a patron
+#define OMDB_API_KEY "fe36d3db"
 #define OMDB_API_URL "http://www.omdbapi.com/?apikey=" 
 
-using namespace nlohmann;
+// todo: refactor all this later
 
 namespace Api
 {
-	class c_metadata
+	class c_film
 	{
 	public:
-		c_metadata( ) = default;
-		c_metadata( const json& entry )
+		// https://en.wikipedia.org/wiki/Standard_(warez)#Naming
+		struct Warez
+		{
+			std::string filename;
+			std::string path;
+			std::map< std::string, std::string > keys;
+
+			Warez( const std::experimental::filesystem::path& p )
+			{
+				filename = p.filename( ).generic_string( );
+				path = p.generic_string( );
+
+				fill_regex( filename );
+			}
+
+			Warez( ) = default;
+
+			inline bool valid( ) const
+			{
+				return keys.size( ) > 1;
+			}
+
+			inline void fill_regex( const std::string filename )
+			{
+				std::vector< std::pair< std::string, std::regex > > token_regexes =
+				{
+					{ "Year", std::regex( "(?!^)[1,2]\\d{3}" ) },
+					{ "Source", std::regex( "\\d{3,4}p", std::regex_constants::icase ) }, // source(1080p, 720p, etc)
+					{ "Audio Codec", std::regex( "AAC2[\\.\s]0|AAC|AC3|DTS|DD5[\\.\s]1", std::regex_constants::icase ) }, // audio codec
+					{ "Group", std::regex( "[A-Za-z0-9]+$" ) }, // group, last token				
+				};
+
+				std::smatch matches;
+
+				for ( u32 i = 0; i < token_regexes.size( ); ++i )
+				{
+					const auto& regex = token_regexes[i];
+
+					if ( std::regex_search( filename, matches, regex.second ) )
+					{
+						for ( auto&& match : matches )
+						{
+							if ( !i )
+							{
+								const u32 pos = filename.find( match.str( ) );
+
+								if ( pos )
+								{
+									std::string title_sanitized = filename.substr( 0, pos - 1 );
+									std::replace( title_sanitized.begin( ), title_sanitized.end( ), '.', ' ' );
+									
+									while ( !title_sanitized.empty( ) && iswspace( title_sanitized.front( ) ) )
+										title_sanitized.erase( title_sanitized.begin( ) );
+
+									while ( !title_sanitized.empty( ) && iswspace( title_sanitized.back( ) ) )
+										title_sanitized.erase( title_sanitized.end( ) - 1 );
+
+									keys["Title"] = title_sanitized;
+								}
+							}
+
+							keys[regex.first] = matches.str( );
+						}
+					}
+				}
+			}
+		};
+
+		c_film( ) : m_valid( false ) { };
+		c_film( const std::experimental::filesystem::path& path ) : m_warez( path )	{ }
+
+		c_film( const json& entry )
 		{
 			fill( entry );
 		}
 
-		c_metadata fill( const json& entry )
+		c_film fill( const json& page )
 		{
-			m_keys["Title"] = entry["Title"].get< std::string >( );
-			m_keys["Year"] = entry["Year"].get< std::string >( );
-			m_keys["Rated"] = entry["Rated"].get< std::string >( );
-			m_keys["Released"] = entry["Released"].get< std::string >( );
-			m_keys["Runtime"] = entry["Runtime"].get< std::string >( );
-			m_keys["Genre"] = entry["Genre"].get< std::string >( );
-			m_keys["Director"] = entry["Director"].get< std::string >( );
-			m_keys["Writer"] = entry["Writer"].get< std::string >( );
-			m_keys["Actors"] = entry["Actors"].get< std::string >( );
-			m_keys["Plot"] = entry["Plot"].get< std::string >( );
-			m_keys["Language"] = entry["Language"].get< std::string >( );
-			m_keys["Country"] = entry["Country"].get< std::string >( );
-			m_keys["Awards"] = entry["Awards"].get< std::string >( );
-			m_keys["Poster"] = entry["Poster"].get< std::string >( );
-			m_keys["Metascore"] = entry["Metascore"].get< std::string >( );
-			m_keys["imdbRating"] = entry["imdbRating"].get< std::string >( );
-			m_keys["imdbID"] = entry["imdbID"].get< std::string >( );
-			m_keys["DVD"] = entry["DVD"].get< std::string >( );
-			m_keys["BoxOffice"] = entry["BoxOffice"].get< std::string >( );
-			m_keys["Production"] = entry["Production"].get< std::string >( );
-			m_keys["Website"] = entry["Website"].get< std::string >( );
+			m_response = page;
 
+			if ( m_response.is_object( ) || m_response.is_array( ) )
+			{
+				for ( auto it = m_response.begin( ); it != m_response.end( ); ++it )
+				{
+					if ( !it->empty( ) && it->type( ) == json::value_t::string )
+						m_keys[it.key( )] = it->get< std::string >( );
+				}
+			}
+
+			auto path = m_keys.find( "Path" );
+			if ( path != m_keys.end( ) && !path->second.empty( ) )
+				m_warez.path = path->second;
+
+			else if ( !m_warez.path.empty( ) )
+				m_response["Path"] = m_warez.path;
+
+			auto watched = m_keys.find( "Watched" );
+			if ( watched == m_keys.end( ) )
+				m_response["Watched"] = "";
+
+			m_valid = !m_keys.empty( ) && !m_keys["Title"].empty( );
 			return *this;
 		}
 
-		// apparently unordered map doesn't support std::string_view
-		std::string find( const std::string& val )
+		bool valid( ) const
 		{
-			return m_keys[val];
+			return m_valid;
+		}
+
+		std::string find( const std::string& val ) const
+		{
+			for ( auto&& key : m_keys )
+			{
+				if ( key.first == val )
+					return key.second;
+			}
+
+			return {};
+		}
+
+		std::vector< u8 > poster( ) const
+		{
+			auto iter = m_keys.find( "Poster" );
+
+			if ( iter == m_keys.end( ) )
+				return {};
+
+			std::string url = iter->second;
+
+			std::vector< u8 > ret;
+			Networking::curl.connect( url, &ret );
+			return ret;
+		}
+
+		json response( ) const
+		{
+			return m_response;
+		}
+
+		std::string path( ) const
+		{
+			return m_warez.path;
+		}
+
+		Warez& warez( )
+		{
+			return m_warez;
 		}
 
 	private:
 		std::unordered_map< std::string, std::string > m_keys;
+		bool m_valid;
+		json m_response;
+		Warez m_warez;
 	};
 
-	struct api_request_t
-	{
-		// while both the imdb_id and title are optional, atleast one must be present in the request
-
-		// * optional * 8 char imdb id
-		std::string imdb_id;
-
-		// * optional * movie title
-		std::string title;
-
-		// <empty>, movie, series, or episode
-		std::string type;
-
-		// release year
-		std::string year;
-
-		// length of description, short or full
-		std::string plot;
-
-		// json or xml
-		std::string response_type;
-
-		// jsonp callback
-		std::string callback;
-
-		// always 1
-		std::string api_version;
-	};
-
-	static inline void iterate_pages_recursively( std::string_view title, u32& page_nr, std::vector< c_metadata >& result )
+	/*static inline void iterate_pages_recursively( std::string_view title, u32& page_nr, std::vector< c_film >& result )
 	{
 		std::vector< u8 >	buf;
 		std::string			url;
 
-		// shrug
 		url.resize( 256 );
 		std::sprintf( url.data( ), "%s%s&s=%s&page=%i", OMDB_API_URL, OMDB_API_KEY, title.data( ), page_nr++ );
 
@@ -100,7 +183,6 @@ namespace Api
 		if ( response.empty( ) || response.find( "Error" ) != response.end( ) || response["Response"].get< std::string >( ) != "True" )
 			return;
 
-		// note: this could cause segfault if the last entry in the list is empty
 		const std::string result_nr = response["totalResults"].get< std::string >( );
 		if ( !result_nr.empty( ) && result.size( ) >= std::atoi( result_nr.c_str( ) ) )
 			return;
@@ -110,65 +192,34 @@ namespace Api
 			const json page = response["Search"];
 
 			for ( auto&& entry : page )
-			{
-				result.push_back( c_metadata( entry ) );
-				printf( "$> %s (%s)\n", entry["Title"].get< std::string >( ).c_str( ), entry["Year"].get< std::string >( ).c_str( ) );
-			}
+				result.push_back( c_film( page ) );			
 		}
 
 		iterate_pages_recursively( title, page_nr, result );
 	}
 
-	// queries a single title and returns a LOT of metadata
-	static inline c_metadata query_single( std::string title )
+	// queries entire database and returns anything matching title
+	static inline std::vector< c_film > query_search( std::string_view title )
+	{
+		u32 page_nr = 1;
+		std::vector< c_film > ret;
+		iterate_pages_recursively( title, page_nr, ret );
+		return ret;
+	}*/
+
+	// queries a single title
+	inline json query( std::string title, std::string year = {} )
 	{
 		std::vector< u8 >	buf;
 		std::string			url;
-		c_metadata			ret;
 
-		// parse year from title (e.g. 1970 from "Scars Of Dracula (1970).mp4")
-		std::string year;
-		for ( u32 i = 0; i < title.length( ); ++i )
-		{
-			if ( std::isdigit( title[i] ) && ( std::isdigit( title[std::min( i + 1, ( u32 ) title.length( ) - 1 )] ) || std::isdigit( title[i - 1] ) ) )
-				 year.push_back( title[i] );
-
-			if ( year.length( ) == 4 )
-			{
-				// 1. https://en.wikipedia.org/wiki/List_of_years_in_film lol 2. i won't be alive then so idc
-				if ( std::atoi( year.c_str( ) ) < 1888 || std::atoi( year.c_str( ) ) > 2050 )
-				{
-					year.clear( );
-					break;
-				}
-
-				else
-				{
-					u32 pos = title.find( year );
-
-					if ( pos != std::string::npos )
-						title.erase( pos, pos + title.length( ) );
-					
-				}
-			}
-		}
-
-		if ( year.length( ) != 4 )
-			year.clear( );
-
-		/*
-			sanitization todo:
-			move to own routine
-			handle strings that may be in copies of (((dubious) legality like 720p.BluRay.x264.anoXmous_.mp4
-		*/
-		// shrug
-		url.resize( 256 );
+		url.resize( 512 );
 
 		if ( year.empty( ) )
-			std::sprintf( url.data( ), "%s%s&t=%s", OMDB_API_URL, OMDB_API_KEY, title.data( ) );
+			std::sprintf( url.data( ), "%s%s&t=%s&plot=full", OMDB_API_URL, OMDB_API_KEY, title.data( ) );
 
 		else
-			std::sprintf( url.data( ), "%s%s&t=%s&year=%s", OMDB_API_URL, OMDB_API_KEY, title.data( ), year.c_str( ) );
+			std::sprintf( url.data( ), "%s%s&t=%s&y=%s&plot=full", OMDB_API_URL, OMDB_API_KEY, title.data( ), year.c_str( ) );
 
 		std::replace( url.begin( ), url.end( ), ' ', '+' );
 
@@ -182,16 +233,31 @@ namespace Api
 		if ( response.empty( ) || response.find( "Error" ) != response.end( ) || response["Response"].get< std::string >( ) != "True" )
 			return {};
 		
-		return ret.fill( response );
+		return response;
 	}
 
-	// queries entire database and returns anything matching title
-	static inline std::vector< c_metadata > query( std::string_view title )
+	// queries a single title, use this when building from file after populating warez struct
+	inline c_film query( c_film& film )
 	{
-		u32 page_nr = 1;
-		std::vector< c_metadata > ret;
-		iterate_pages_recursively( title, page_nr, ret );
-		printf( "\n$> found %u results\n", ret.size( ) );
-		return ret;
+		auto title = film.warez( ).keys.find( "Title" );
+		auto year = film.warez( ).keys.find( "Year" );
+
+		if ( title == film.warez( ).keys.end( ) )
+			return {};
+
+		const json response = query( title->second, year != film.warez( ).keys.end( ) ? year->second : std::string( ) );
+		
+		if ( response.empty( ) )
+			return {};
+
+		return film.fill( response );
+	}
+
+	// query from file
+	inline c_film query( const std::experimental::filesystem::path& path )
+	{
+		c_film film( path );
+	
+		return query( film );
 	}
 }

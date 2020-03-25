@@ -18,22 +18,18 @@ namespace Networking
 		void setup( )
 		{
 			if ( curl_global_init( CURL_GLOBAL_DEFAULT ) == CURLE_FAILED_INIT )
-			{
-				Debug::log;
-				return;
-			}
+				return;			
 
 			m_curl = curl_easy_init( );
 
 			if ( !m_curl )
-			{
-				Debug::log;
 				return;
-			}
+			
 
 			curl_easy_setopt( m_curl, CURLOPT_WRITEFUNCTION, write_function );
-			curl_easy_setopt( m_curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP );
+			curl_easy_setopt( m_curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS );
 			curl_easy_setopt( m_curl, CURLOPT_POSTREDIR, CURL_REDIR_GET_ALL );			
+			curl_easy_setopt( m_curl, CURLOPT_SSL_VERIFYPEER, 0 );
 		}
 
 		void release( )
@@ -54,8 +50,7 @@ namespace Networking
 			m_header = curl_slist_append( m_header, "User-Agent: Mozilla/5.0 (X11; U; Linux amd64; rv:5.0) Gecko/20100101 Firefox/5.0 (Debian)" );
 			curl_easy_setopt( m_curl, CURLOPT_WRITEDATA, data );
 			curl_easy_setopt( m_curl, CURLOPT_URL, url.data( ) );
-			//curl_easy_setopt( m_curl, CURLOPT_HEADER, 1 );
-			curl_easy_setopt( m_curl, CURLOPT_HTTPHEADER, m_header );
+			curl_easy_setopt( m_curl, CURLOPT_FOLLOWLOCATION, 1 );
 			curl_easy_perform( m_curl );
 			curl_easy_getinfo( m_curl, CURLINFO_RESPONSE_CODE, &response );
 

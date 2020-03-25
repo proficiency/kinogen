@@ -4,3 +4,15 @@
 [submodule "curl"]
 	path = curl
 	url = https://github.com/curl/curl
+[submodule "SDL"]
+	path = SDL
+	url = https://github.com/SDL-mirror/SDL
+[submodule "glew"]
+	path = glew
+	url = https://github.com/nigels-com/glew
+[submodule "imgui"]
+	path = imgui
+	url = https://github.com/ocornut/imgui/
+[submodule "stb"]
+	path = stb
+	url = https://github.com/nothings/stb/
